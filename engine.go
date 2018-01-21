@@ -62,10 +62,12 @@
 
 package main
 
-type Engine struct {
+import (
+	"database/sql"
+	"sync"
+)
 
-	// Optional callback function that is called when a trade is executed.
-	Execute func(Execution)
+type Engine struct {
 
 	// An array of pricePoint structures representing the entire limit order
 	// book.
@@ -79,14 +81,18 @@ type Engine struct {
 	// structure allows us to avoid the overhead of heap-based memory
 	// allocation.
 	bookEntries [maxNumOrders]orderBookEntry
+
+	deals [maxNumDeals]Deal
+	curDealID uint
 }
 
 // struct orderBookEntry: Describes a single outstanding limit order (Buy or
 // Sell).
 type orderBookEntry struct {
-	size   Size
-	next   *orderBookEntry
-	trader string
+	size    Size
+	next    *orderBookEntry
+	trader  string
+	id      uint64
 }
 
 // struct pricePoint: Describes a single price point in the limit order book.
@@ -95,21 +101,41 @@ type pricePoint struct {
 	listTail *orderBookEntry
 }
 
-const maxNumOrders uint = 1010000
+type Deal struct {
+	bidOrderID  uint64
+	askOrderID  uint64
+	askTrader   string
+	bidTrader   string
+	symbol      string
+	price       Price
+	size        Size
+}
 
-func (e *Engine) Reset() {
+type DealSlice []Deal
+
+const maxNumOrders uint = 1010000
+const maxNumDeals  uint = maxNumOrders / 2
+
+func (e *Engine) Reset(db *sql.DB, additionalRandomRecords int) {
+	ResetSchema(db)
+	FillTestData(db, additionalRandomRecords)
+
 	for _, pricePoint := range e.pricePoints {
 		pricePoint.listHead = nil
 		pricePoint.listTail = nil
 	}
 
+	e.pricePoints = *new([uint(maxPrice) + 1]pricePoint)
+
 	for _, bookEntry := range e.bookEntries {
 		bookEntry.size = 0
 		bookEntry.next = nil
 		bookEntry.trader = ""
+		bookEntry.id = 0
 	}
 
 	e.curOrderID = 0
+	e.curDealID = 0
 	e.askMin = uint(maxPrice) + 1
 	e.bidMax = uint(minPrice) - 1
 }
@@ -130,12 +156,12 @@ func (e *Engine) Limit(order Order) OrderID {
 
 				for bookEntry != nil {
 					if bookEntry.size < orderSize {
-						execute(e.Execute, order.symbol, order.trader, bookEntry.trader, price, bookEntry.size)
+						e.executeTrade(order.id, bookEntry.id, order.symbol, order.trader, bookEntry.trader, price, bookEntry.size)
 
 						orderSize -= bookEntry.size
 						bookEntry = bookEntry.next
 					} else {
-						execute(e.Execute, order.symbol, order.trader, bookEntry.trader, price, orderSize)
+						e.executeTrade(order.id, bookEntry.id, order.symbol, order.trader, bookEntry.trader, price, orderSize)
 
 						if bookEntry.size > orderSize {
 							bookEntry.size -= orderSize
@@ -165,6 +191,7 @@ func (e *Engine) Limit(order Order) OrderID {
 		entry := &e.bookEntries[e.curOrderID]
 		entry.size = orderSize
 		entry.trader = order.trader
+		entry.id = order.id
 		ppInsertOrder(&e.pricePoints[price], entry)
 
 		if e.bidMax < uint(price) {
@@ -182,12 +209,12 @@ func (e *Engine) Limit(order Order) OrderID {
 
 				for bookEntry != nil {
 					if bookEntry.size < orderSize {
-						execute(e.Execute, order.symbol, bookEntry.trader, order.trader, price, bookEntry.size)
+						e.executeTrade(bookEntry.id, order.id, order.symbol, bookEntry.trader, order.trader, price, bookEntry.size)
 
 						orderSize -= bookEntry.size
 						bookEntry = bookEntry.next
 					} else {
-						execute(e.Execute, order.symbol, bookEntry.trader, order.trader, price, orderSize)
+						e.executeTrade(bookEntry.id, order.id, order.symbol, bookEntry.trader, order.trader, price, orderSize)
 
 						if bookEntry.size > orderSize {
 							bookEntry.size -= orderSize
@@ -217,6 +244,7 @@ func (e *Engine) Limit(order Order) OrderID {
 		entry := &e.bookEntries[e.curOrderID]
 		entry.size = orderSize
 		entry.trader = order.trader
+		entry.id = order.id
 		ppInsertOrder(&e.pricePoints[price], entry)
 
 		if e.askMin > uint(price) {
@@ -232,25 +260,41 @@ func (e *Engine) Cancel(orderID OrderID) {
 }
 
 // Report trade execution.
-func execute(hook func(Execution), symbol, buyTrader, sellTrader string, price Price, size Size) {
-	if hook == nil {
-		return // No callback defined.
-	}
-
+func (e *Engine) executeTrade(bidOrderID uint64, askOrderID uint64, symbol string, bidTrader string, askTrader string, price Price, size Size) {
 	if size == 0 {
 		return // Skip orders that have been cancelled.
 	}
 
-	var exec Execution = Execution{symbol: symbol, price: price, size: size}
+	e.deals[e.curDealID] = Deal{
+		bidOrderID,
+		askOrderID,
+		askTrader,
+		bidTrader,
+		symbol,
+		price,
+		size,
+	}
+	e.curDealID++
+}
 
-	exec.side = Bid
-	exec.trader = buyTrader
+const batchPersistSize = 20000
 
-	hook(exec) // Report the buy-side trade.
+func (e *Engine) Persist(db *sql.DB) {
+	var wg sync.WaitGroup
+	for i := 0; i < int(e.curDealID); i += batchPersistSize {
+		end := i + batchPersistSize
+		wg.Add(1)
 
-	exec.side = Ask
-	exec.trader = sellTrader
-	hook(exec) // Report the sell-side trade.
+		if end > int(e.curDealID) {
+			end = int(e.curDealID)
+		}
+
+		go func(sb, se int) {
+			defer wg.Done()
+			PersistDeals(db, e.deals[sb:se])
+		}(i, end)
+	}
+	wg.Wait()
 }
 
 // Insert a new order book entry at the tail of the price point list.

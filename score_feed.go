@@ -1,6 +1,6 @@
 package main
 
-var ordersFeed = []Order{
+var inputOrdersFeed = []InputOrder{
 	{"SYM", "ID8", Bid, 4799, 500},
 	{"SYM", "ID4", Bid, 4799, 800},
 	{"SYM", "ID7", Bid, 0, 2},
@@ -166,9 +166,9 @@ var ordersFeed = []Order{
 	{"SYM", "ID2", Bid, 4801, 9000},
 	{"SYM", "ID1", Bid, 0, 133},
 	{"SYM", "ID9", Ask, 4801, 500},
-	{"----", "ID1", Ask, 4801, 500},
-	{"OI", "ID3", Ask, 4801, 500}, /* SLOW! */
-	{"----", "ID5", Bid, 4801, 5000},
+	{"SYM", "ID1", Ask, 4801, 500},
+	{"SYM", "ID3", Ask, 4801, 500},
+	{"SYM", "ID5", Bid, 4801, 5000},
 	{"SYM", "ID4", Bid, 0, 75},
 	{"SYM", "ID7", Bid, 0, 68},
 	{"SYM", "ID6", Bid, 4801, 3000},
