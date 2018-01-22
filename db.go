@@ -186,9 +186,11 @@ func PersistDeals(tx *sql.Tx, deals DealSlice) {
 
 	var blockOrdersSql = `
 		with cte as (
-			select sum(d.size) as blocked_size, d.bid_order_id as order_id from deals d where d.bid_order_id between $1 and $2 group by d.bid_order_id
+			select sum(d.size) as blocked_size, d.bid_order_id as order_id 
+			from deals d where d.bid_order_id between $1 and $2 group by d.bid_order_id
 			union all
-			select sum(d.size) as blocked_size, d.ask_order_id as order_id from deals d where d.ask_order_id between $1 and $2 group by d.ask_order_id
+			select sum(d.size) as blocked_size, d.ask_order_id as order_id 
+			from deals d where d.ask_order_id between $1 and $2 group by d.ask_order_id
 		)
 
 		update orders as o
