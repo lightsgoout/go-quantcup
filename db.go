@@ -106,16 +106,24 @@ const fetchOrdersSQL = `
 		case when side = 'bid' then 0 else 1 end as side, 
 		price, 
 		size - coalesce(blocked_size, 0) as size 
-		FROM orders ORDER BY id ASC
-	FOR UPDATE NOWAIT
+		FROM orders 
+		where size - coalesce(blocked_size, 0) > 0
+		ORDER BY id ASC
+	FOR UPDATE NOWAIT LIMIT $1
 `
 
 func FetchOrders(tx *sql.Tx) []Order {
-	rows, err := tx.Query(fetchOrdersSQL)
+	stmt, err := tx.Prepare(fetchOrdersSQL)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	rows, err := stmt.Query(maxNumOrders)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
+	defer stmt.Close()
 
 	var result []Order
 
