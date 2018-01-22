@@ -83,17 +83,17 @@ type Engine struct {
 	// allocation.
 	bookEntries [maxNumOrders]orderBookEntry
 
-	deals [maxNumDeals]Deal
+	deals     [maxNumDeals]Deal
 	curDealID uint
 }
 
 // struct orderBookEntry: Describes a single outstanding limit order (Buy or
 // Sell).
 type orderBookEntry struct {
-	size    Size
-	next    *orderBookEntry
-	trader  string
-	id      uint64
+	size   Size
+	next   *orderBookEntry
+	trader string
+	id     uint64
 }
 
 // struct pricePoint: Describes a single price point in the limit order book.
@@ -103,17 +103,17 @@ type pricePoint struct {
 }
 
 type Deal struct {
-	bidOrderID  uint64
-	askOrderID  uint64
-	symbol      string
-	price       Price
-	size        Size
+	bidOrderID uint64
+	askOrderID uint64
+	symbol     string
+	price      Price
+	size       Size
 }
 
 type DealSlice []Deal
 
 const maxNumOrders uint = 1010000
-const maxNumDeals  uint = maxNumOrders / 2
+const maxNumDeals uint = maxNumOrders / 2
 
 func (e *Engine) Reset(db *sql.DB, ordersToGenerate int) {
 	ResetSchema(db)
@@ -253,7 +253,6 @@ func (e *Engine) Limit(order Order) OrderID {
 		return e.curOrderID
 	}
 }
-
 
 // Report trade execution.
 func (e *Engine) executeTrade(bidOrderID uint64, askOrderID uint64, symbol string, bidTrader string, askTrader string, price Price, size Size) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/grd/stat"
 	"database/sql"
+	"github.com/grd/stat"
 	"log"
 )
 
@@ -13,7 +13,7 @@ const (
 	batchSize   int = 10
 	replayCount     = 10
 
-	nanoToSeconds   = 1e-9
+	nanoToSeconds    = 1e-9
 	ordersToGenerate = 100000
 )
 
@@ -33,10 +33,9 @@ func main() {
 	totalLatencies := make([]time.Duration, replayCount)
 
 	for j := 0; j < replayCount; j++ {
-		log.Printf("=== Round #%d", j + 1)
+		log.Printf("=== Round #%d", j+1)
 		e.Reset(db, 100000)
 		totalBegin := time.Now()
-
 
 		tx, err := db.Begin()
 		if err != nil {
@@ -76,18 +75,18 @@ func main() {
 	var mean float64 = stat.Mean(engineDurations)
 	var stdDev = stat.SdMean(engineDurations, mean)
 
-	fmt.Printf("[engine] mean(latency) = %1.2f, sd(latency) = %1.2f\n", mean * nanoToSeconds, stdDev * nanoToSeconds)
+	fmt.Printf("[engine] mean(latency) = %1.2f, sd(latency) = %1.2f\n", mean*nanoToSeconds, stdDev*nanoToSeconds)
 
 	var fetchMean = stat.Mean(fetchDurations)
 	var fetchStdDev = stat.SdMean(fetchDurations, mean)
-	fmt.Printf("[fetch] mean(latency) = %1.2f, sd(latency) = %1.2f\n", fetchMean * nanoToSeconds, fetchStdDev * nanoToSeconds)
+	fmt.Printf("[fetch] mean(latency) = %1.2f, sd(latency) = %1.2f\n", fetchMean*nanoToSeconds, fetchStdDev*nanoToSeconds)
 
 	var persistMean = stat.Mean(persistDurations)
 	var persistStdDev = stat.SdMean(persistDurations, mean)
-	fmt.Printf("[persist] mean(latency) = %1.2f, sd(latency) = %1.2f\n", persistMean * nanoToSeconds, persistStdDev * nanoToSeconds)
+	fmt.Printf("[persist] mean(latency) = %1.2f, sd(latency) = %1.2f\n", persistMean*nanoToSeconds, persistStdDev*nanoToSeconds)
 
 	var totalMean = stat.Mean(totalDurations)
-	fmt.Printf("[total] %1.1f orders per second", ordersToGenerate / (totalMean * nanoToSeconds))
+	fmt.Printf("[total] %1.1f orders per second", ordersToGenerate/(totalMean*nanoToSeconds))
 }
 
 func feed(e *Engine, begin, end int, Orders []Order) {

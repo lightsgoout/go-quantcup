@@ -3,8 +3,8 @@ package main
 import (
 	"database/sql"
 
-	"log"
 	"github.com/lib/pq"
+	"log"
 	"math/rand"
 )
 
@@ -12,10 +12,9 @@ import (
 //  {"SYM", "ID0", Bid, 0, 179},
 //
 const (
-	randomSeed = 42
+	randomSeed   = 42
 	cancelChance = 0.05
 )
-
 
 func ResetSchema(db *sql.DB) {
 	schemaDDL := `
@@ -134,7 +133,6 @@ func FetchOrders(tx *sql.Tx) []Order {
 	return result
 }
 
-
 func min(a, b uint64) uint64 {
 	if a < b {
 		return a
@@ -148,7 +146,6 @@ func max(a, b uint64) uint64 {
 	}
 	return b
 }
-
 
 func PersistDeals(tx *sql.Tx, deals DealSlice) {
 	stmt, err := tx.Prepare(pq.CopyIn("deals", "bid_order_id", "ask_order_id", "price", "size", "symbol"))
