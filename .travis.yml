@@ -1,9 +1,0 @@
-language: go
-notifications:
-  email:
-    recipients: rdingwall@gmail.com
-    on_success: change
-    on_failure: always
-install:
-  - go get github.com/stretchr/testify/assert
-  - go get github.com/grd/stat

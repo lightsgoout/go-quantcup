@@ -29,12 +29,21 @@ type Order struct {
 
 var traderChoices = []string{"ID0", "ID1", "ID2", "ID3", "ID4", "ID5", "ID6", "ID7", "ID8"}
 
-func GenerateRandomOrder() InputOrder {
+func GenerateRandomOrder(cancelChance float32) InputOrder {
+	var isCancelled = rand.Float32() <= cancelChance
+	var price = 0
+
+	if isCancelled {
+		price = 0
+	} else {
+		price = rand.Intn(int(maxPrice) - 1)
+	}
+
 	return InputOrder{
 		"SYM",
 		traderChoices[rand.Intn(9)],
 		Side(rand.Intn(2)),
-		Price(rand.Intn(int(maxPrice) - 1)),
+		Price(price),
 		Size(rand.Intn(1000)),
 	}
 }

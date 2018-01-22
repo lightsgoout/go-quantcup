@@ -14,6 +14,7 @@ const (
 	replayCount     = 10
 
 	nanoToSeconds   = 1e-9
+	ordersToGenerate = 100000
 )
 
 func main() {
@@ -26,16 +27,24 @@ func main() {
 	}
 
 	// batch latency measurements.
-	engineLatencies := make([]time.Duration, replayCount*(len(inputOrdersFeed)))
+	engineLatencies := make([]time.Duration, replayCount*ordersToGenerate)
 	fetchLatencies := make([]time.Duration, replayCount)
 	persistLatencies := make([]time.Duration, replayCount)
+	totalLatencies := make([]time.Duration, replayCount)
 
 	for j := 0; j < replayCount; j++ {
 		log.Printf("=== Round #%d", j + 1)
 		e.Reset(db, 100000)
+		totalBegin := time.Now()
+
+
+		tx, err := db.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		fetchBegin := time.Now()
-		OrdersFeed := FetchOrders(db)
+		OrdersFeed := FetchOrders(tx)
 		fetchEnd := time.Now()
 		fetchLatencies[j] = fetchEnd.Sub(fetchBegin)
 
@@ -43,18 +52,26 @@ func main() {
 			begin := time.Now()
 			feed(&e, i-batchSize, i, OrdersFeed)
 			end := time.Now()
-			engineLatencies[i/batchSize-1+(j*(len(inputOrdersFeed)/batchSize))] = end.Sub(begin)
+			engineLatencies[i/batchSize-1+(j*(ordersToGenerate/batchSize))] = end.Sub(begin)
 		}
 
 		persistBegin := time.Now()
-		e.Persist(db)
+		e.Persist(tx)
+		err = tx.Commit()
+		if err != nil {
+			log.Fatal(err)
+		}
 		persistEnd := time.Now()
 		persistLatencies[j] = persistEnd.Sub(persistBegin)
+
+		totalEnd := time.Now()
+		totalLatencies[j] = totalEnd.Sub(totalBegin)
 	}
 
 	engineDurations := DurationSlice(engineLatencies)
 	fetchDurations := DurationSlice(fetchLatencies)
 	persistDurations := DurationSlice(persistLatencies)
+	totalDurations := DurationSlice(totalLatencies)
 
 	var mean float64 = stat.Mean(engineDurations)
 	var stdDev = stat.SdMean(engineDurations, mean)
@@ -69,15 +86,14 @@ func main() {
 	var persistStdDev = stat.SdMean(persistDurations, mean)
 	fmt.Printf("[persist] mean(latency) = %1.2f, sd(latency) = %1.2f\n", persistMean * nanoToSeconds, persistStdDev * nanoToSeconds)
 
+	var totalMean = stat.Mean(totalDurations)
+	fmt.Printf("[total] %1.1f orders per second", ordersToGenerate / (totalMean * nanoToSeconds))
 }
 
 func feed(e *Engine, begin, end int, Orders []Order) {
 	for i := begin; i < end; i++ {
 		var order Order = Orders[i]
-		if order.price == 0 {
-			orderID := OrderID(order.size)
-			e.Cancel(orderID)
-		} else {
+		if order.price != 0 {
 			e.Limit(order)
 		}
 	}

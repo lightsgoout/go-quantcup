@@ -11,6 +11,11 @@ import (
 //	{"SYM", "ID0", Bid, 4818, 179},
 //  {"SYM", "ID0", Bid, 0, 179},
 //
+const (
+	randomSeed = 42
+	cancelChance = 0.05
+)
+
 
 func ResetSchema(db *sql.DB) {
 	schemaDDL := `
@@ -20,17 +25,18 @@ func ResetSchema(db *sql.DB) {
 		DROP TYPE IF EXISTS symbol CASCADE;
 		CREATE TYPE symbol as ENUM ('SYM');
 		
-		DROP TABLE IF EXISTS orders;
+		DROP TABLE IF EXISTS orders CASCADE;
 		CREATE TABLE orders (
 			id serial primary key,
 			symbol symbol,
 			trader varchar,
 			side exchange_side,
 			price int,
-			size int
-		);
+			size int,
+			blocked_size int
+		) with (fillfactor=90);
 		
-		DROP TABLE IF EXISTS deals;
+		DROP TABLE IF EXISTS deals CASCADE;
 		CREATE TABLE deals (
 			id serial primary key,
 			bid_order_id bigint,
@@ -39,6 +45,8 @@ func ResetSchema(db *sql.DB) {
 			size int,
 			symbol symbol
 		);
+		
+		
 	`
 
 	_, err := db.Exec(schemaDDL)
@@ -48,7 +56,7 @@ func ResetSchema(db *sql.DB) {
 	log.Printf("DB schema created")
 }
 
-func FillTestData(db *sql.DB, additionalRandomRecords int) {
+func FillTestData(db *sql.DB, ordersToGenerate int) {
 	tx, err := db.Begin()
 	if err != nil {
 		log.Fatal(err)
@@ -59,7 +67,10 @@ func FillTestData(db *sql.DB, additionalRandomRecords int) {
 		log.Fatal(err)
 	}
 
-	for _, order := range inputOrdersFeed {
+	rand.Seed(randomSeed)
+
+	for i := 0; i < ordersToGenerate; i++ {
+		var order = GenerateRandomOrder(cancelChance)
 		var sqlSide = ""
 		if order.side == Bid {
 			sqlSide = "bid"
@@ -73,24 +84,7 @@ func FillTestData(db *sql.DB, additionalRandomRecords int) {
 		}
 	}
 
-	rand.Seed(42)
-
-	for i := 0; i <= additionalRandomRecords; i++ {
-		var order = GenerateRandomOrder()
-		var sqlSide = ""
-		if order.side == Bid {
-			sqlSide = "bid"
-		} else {
-			sqlSide = "ask"
-		}
-		_, err := stmt.Exec(order.symbol, order.trader, sqlSide, order.price, order.size)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	log.Printf("%d test orders created", len(inputOrdersFeed))
-	log.Printf("%d additional random orders generated", additionalRandomRecords)
+	log.Printf("%d random orders generated", ordersToGenerate)
 
 	_, err = stmt.Exec()
 	if err != nil {
@@ -107,8 +101,20 @@ func FillTestData(db *sql.DB, additionalRandomRecords int) {
 
 }
 
-func FetchOrders(db *sql.DB) []Order {
-	rows, err := db.Query("SELECT id, symbol, trader, case when side = 'bid' then 0 else 1 end as side, price, size FROM orders ORDER BY id ASC")
+const fetchOrdersSQL = `
+	SELECT 
+		id, 
+		symbol, 
+		trader, 
+		case when side = 'bid' then 0 else 1 end as side, 
+		price, 
+		size - coalesce(blocked_size, 0) as size 
+		FROM orders ORDER BY id ASC
+	FOR UPDATE NOWAIT
+`
+
+func FetchOrders(tx *sql.Tx) []Order {
+	rows, err := tx.Query(fetchOrdersSQL)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -128,18 +134,44 @@ func FetchOrders(db *sql.DB) []Order {
 	return result
 }
 
-func PersistDeals(db *sql.DB, deals DealSlice) {
-	tx, err := db.Begin()
-	if err != nil {
-		log.Fatal(err)
-	}
 
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+
+func PersistDeals(tx *sql.Tx, deals DealSlice) {
 	stmt, err := tx.Prepare(pq.CopyIn("deals", "bid_order_id", "ask_order_id", "price", "size", "symbol"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	var minOrderID uint64 = 0
+	var maxOrderID uint64 = 0
+
 	for _, deal := range deals {
+		if minOrderID == 0 {
+			minOrderID = min(deal.bidOrderID, deal.askOrderID)
+		} else {
+			minOrderID = min(min(deal.bidOrderID, deal.askOrderID), minOrderID)
+		}
+
+		if maxOrderID == 0 {
+			maxOrderID = max(deal.bidOrderID, deal.askOrderID)
+		} else {
+			maxOrderID = max(max(deal.bidOrderID, deal.askOrderID), maxOrderID)
+		}
+
 		_, err := stmt.Exec(deal.bidOrderID, deal.askOrderID, deal.price, deal.size, deal.symbol)
 		if err != nil {
 			log.Fatal(err)
@@ -156,9 +188,29 @@ func PersistDeals(db *sql.DB, deals DealSlice) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = tx.Commit()
+
+	var blockOrdersSql = `
+		with cte as (
+			select sum(d.size) as blocked_size, d.bid_order_id as order_id from deals d group by d.bid_order_id
+			union all
+			select sum(d.size) as blocked_size, d.ask_order_id as order_id from deals d group by d.ask_order_id
+		)
+
+		update orders as o
+		set blocked_size = cte.blocked_size
+		from cte
+		where cte.order_id = o.id and (o.id between $1 and $2)
+	`
+
+	stmt, err = tx.Prepare(blockOrdersSql)
+	_, err = stmt.Exec(minOrderID, maxOrderID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = stmt.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	log.Printf("min = %d, max = %d blocked", minOrderID, maxOrderID)
 }

@@ -64,7 +64,8 @@ package main
 
 import (
 	"database/sql"
-	"sync"
+	//"sync"
+	//"sync"
 )
 
 type Engine struct {
@@ -104,8 +105,6 @@ type pricePoint struct {
 type Deal struct {
 	bidOrderID  uint64
 	askOrderID  uint64
-	askTrader   string
-	bidTrader   string
 	symbol      string
 	price       Price
 	size        Size
@@ -116,9 +115,9 @@ type DealSlice []Deal
 const maxNumOrders uint = 1010000
 const maxNumDeals  uint = maxNumOrders / 2
 
-func (e *Engine) Reset(db *sql.DB, additionalRandomRecords int) {
+func (e *Engine) Reset(db *sql.DB, ordersToGenerate int) {
 	ResetSchema(db)
-	FillTestData(db, additionalRandomRecords)
+	FillTestData(db, ordersToGenerate)
 
 	for _, pricePoint := range e.pricePoints {
 		pricePoint.listHead = nil
@@ -255,9 +254,6 @@ func (e *Engine) Limit(order Order) OrderID {
 	}
 }
 
-func (e *Engine) Cancel(orderID OrderID) {
-	e.bookEntries[orderID].size = 0
-}
 
 // Report trade execution.
 func (e *Engine) executeTrade(bidOrderID uint64, askOrderID uint64, symbol string, bidTrader string, askTrader string, price Price, size Size) {
@@ -268,8 +264,6 @@ func (e *Engine) executeTrade(bidOrderID uint64, askOrderID uint64, symbol strin
 	e.deals[e.curDealID] = Deal{
 		bidOrderID,
 		askOrderID,
-		askTrader,
-		bidTrader,
 		symbol,
 		price,
 		size,
@@ -277,24 +271,8 @@ func (e *Engine) executeTrade(bidOrderID uint64, askOrderID uint64, symbol strin
 	e.curDealID++
 }
 
-const batchPersistSize = 20000
-
-func (e *Engine) Persist(db *sql.DB) {
-	var wg sync.WaitGroup
-	for i := 0; i < int(e.curDealID); i += batchPersistSize {
-		end := i + batchPersistSize
-		wg.Add(1)
-
-		if end > int(e.curDealID) {
-			end = int(e.curDealID)
-		}
-
-		go func(sb, se int) {
-			defer wg.Done()
-			PersistDeals(db, e.deals[sb:se])
-		}(i, end)
-	}
-	wg.Wait()
+func (e *Engine) Persist(tx *sql.Tx) {
+	PersistDeals(tx, e.deals[:e.curDealID])
 }
 
 // Insert a new order book entry at the tail of the price point list.
